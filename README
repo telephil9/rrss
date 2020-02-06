@@ -1,0 +1,6 @@
+This is a fork of rrss (http://code.9front.org/hg/rrss) by Stanley Lieber.
+This version is modified to handle multiple feeds at once.
+When run the program expect a text files with the following format:
+<feed url> [tag1 [tag2 ... [tagN]]]
+
+For documentation refer to rrss.txt which is the original README of the program.
