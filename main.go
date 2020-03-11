@@ -5,8 +5,10 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"html"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"path"
 	"sort"
@@ -17,14 +19,6 @@ import (
 	"github.com/SlyMarbo/rss"
 )
 
-var (
-	debug	= flag.Bool("d", false, "print debug msgs to stderr")
-	format	= flag.String("f", "", "output format")
-	root    = flag.String("r", "", "output root")
-	dest	string
-	links 	string
-)
-
 type Article struct {
 	Title	string
 	Link	string
@@ -33,7 +27,20 @@ type Article struct {
 	Tags	[]string
 }
 
-type renderfn func(articles []Article)
+type renderer func(articles []Article)
+type filter func(article *Article)
+
+var (
+	debug	= flag.Bool("d", false, "print debug msgs to stderr")
+	format	= flag.String("f", "", "output format")
+	root    = flag.String("r", "", "output root")
+	dest	string
+	links 	string
+)
+var filters = map[string]filter {
+	"http://feeds.feedburner.com/Explosm": filterexplosm,
+}
+
 
 func usage() {
 	os.Stderr.WriteString("usage: rrss [-d] [-f barf|blagh] [-r root] <feed file>\n")
@@ -45,6 +52,16 @@ func check(err error) {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func fetchfeed(url string) (resp *http.Response, err error) {
+	client := http.DefaultClient
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("User-Agent", "Mozilla/5.0 (compatible; hjdicks)")
+	return client.Do(req)
 }
 
 func isold(link string, path string) bool {
@@ -151,12 +168,29 @@ func lastarticle(dir string) int {
 	return n
 }
 
+func filterexplosm(article *Article) {
+	r, err := http.Get(article.Link)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer r.Body.Close()
+	scanner := bufio.NewScanner(r.Body)
+	for scanner.Scan() {
+		if strings.Contains(scanner.Text(), "main-comic") {
+			s := strings.Replace(scanner.Text(), "src=\"", "src=\"http:", 1)
+			article.Content = s
+			break;
+		}
+	}
+}
+
 func loadfeed(url string, tags []string) []Article {
 	var articles []Article
 	if *debug {
 		log.Printf("Fetching feed '%s'", url)
 	}
-	feed, err := rss.Fetch(url)
+	feed, err := rss.FetchByFunc(fetchfeed, url)
 	if err != nil {
 		log.Printf("Cannot load feed '%s': %v", url, err)
 		return nil
@@ -166,6 +200,9 @@ func loadfeed(url string, tags []string) []Article {
 			continue
 		}
 		a := Article{i.Title, i.Link, i.Date, conorsum(i), tags}
+		if f, ok := filters[url]; ok {
+			f(&a)
+		}
 		articles = append(articles, a)
 	}
 	if *debug {
@@ -175,13 +212,14 @@ func loadfeed(url string, tags []string) []Article {
 }
 
 func conorsum(i *rss.Item) string {
-	if len(i.Content) > 0 {
-		return i.Content
+	s := ""
+	switch{
+	case len(i.Content) > 0:
+		s = i.Content
+	case len(i.Summary) > 0:
+		s = i.Summary
 	}
-	if len(i.Summary) > 0 {
-		return i.Summary
-	}
-	return ""
+	return html.UnescapeString(s)
 }
 
 func main() {
@@ -190,7 +228,7 @@ func main() {
 	if flag.Arg(0) == "" {
 		usage()
 	}
-	var render renderfn
+	var render renderer
 	switch *format {
 	case "barf":
 		render = barf
@@ -209,7 +247,11 @@ func main() {
 	var articles []Article
 	var tags []string
 	for scanner.Scan() {
-		l := strings.Split(scanner.Text(), " ")
+		t := scanner.Text()
+		if len(t) <= 0 {
+			continue
+		}
+		l := strings.Split(t, " ")
 		if len(l) > 1 {
 			tags = l[1:]
 		}
