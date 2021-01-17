@@ -64,29 +64,31 @@ func fetchfeed(url string) (resp *http.Response, err error) {
 	return client.Do(req)
 }
 
-func isold(link string, path string) bool {
+func isold(date time.Time, link string, path string) bool {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0775)
 	if err != nil {
 		return true
 	}
 	defer file.Close()
+	s := fmt.Sprintf("%d_%s", date.Unix(), link);
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		if strings.Contains(link, scanner.Text()) {
+		if strings.Contains(s, scanner.Text()) {
 			return true
 		}
 	}
 	return false
 }
 
-func makeold(link string, path string) (int, error) {
+func makeold(date time.Time, link string, path string) (int, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0775)
 	defer f.Close()
 	check(err)
 	if link == "" {
 		link = "empty"
 	}
-	return f.WriteString(link + "\n")
+	s := fmt.Sprintf("%d_%s", date.Unix(), link);
+	return f.WriteString(s + "\n")
 }
 
 func writef(dir, filename, content string) {
@@ -120,7 +122,7 @@ func barf(articles []Article) {
 				check(err)
 			}
 		}
-		_, err := makeold(a.Link, links)
+		_, err := makeold(a.Date, a.Link, links)
 		check(err)
 	}
 }
@@ -137,7 +139,7 @@ func blagh(articles []Article) {
 		d := fmt.Sprintf("%s/%d", dest, len(n))
 		ensuredir(d)
 		writef(d, "index.md", fmt.Sprintf("%s\n===\n\n%s\n", a.Title, a.Content))
-		_, err = makeold(a.Link, links)
+		_, err = makeold(a.Date, a.Link, links)
 		check(err)
 	}
 }
@@ -196,7 +198,7 @@ func loadfeed(url string, tags []string) []Article {
 		return nil
 	}
 	for _, i := range feed.Items {
-		if isold(i.Link, links) {
+		if isold(i.Date, i.Link, links) {
 			continue
 		}
 		a := Article{i.Title, i.Link, i.Date, conorsum(i), tags}
